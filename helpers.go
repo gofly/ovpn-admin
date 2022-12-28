@@ -24,12 +24,22 @@ func parseDate(layout, datetime string) time.Time {
 	return t
 }
 
-func parseDateToString(layout, datetime, format string) string {
-	return parseDate(layout, datetime).Format(format)
+func parseDateToString(layouts []string, datetime, format string) string {
+	for _, layout := range layouts {
+		if len(layout) == len(datetime) {
+			return parseDate(layout, datetime).Format(format)
+		}
+	}
+	return ""
 }
 
-func parseDateToUnix(layout, datetime string) int64 {
-	return parseDate(layout, datetime).Unix()
+func parseDateToUnix(layouts []string, datetime string) int64 {
+	for _, layout := range layouts {
+		if len(layout) == len(datetime) {
+			return parseDate(layout, datetime).Unix()
+		}
+	}
+	return 0
 }
 
 func runBash(script string) string {

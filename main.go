@@ -7,13 +7,8 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"io/ioutil"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"net"
 	"net/http"
 	"os"
@@ -24,6 +19,11 @@ import (
 	"text/template"
 	"time"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/gobuffalo/packr/v2"
 	"github.com/prometheus/client_golang/prometheus"
@@ -40,7 +40,6 @@ const (
 	downloadCcdApiUrl    = "/api/data/ccd/download"
 	certsArchiveFileName = "certs.tar.gz"
 	ccdArchiveFileName   = "ccd.tar.gz"
-	indexTxtDateLayout   = "060102150405Z"
 	stringDateFormat     = "2006-01-02 15:04:05"
 
 	kubeNamespaceFilePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
@@ -73,8 +72,9 @@ var (
 	logFormat                = kingpin.Flag("log.format", "set log format: text, json (default text)").Default("text").Envar("LOG_FORMAT").String()
 	storageBackend           = kingpin.Flag("storage.backend", "storage backend: filesystem, kubernetes.secrets (default filesystem)").Default("filesystem").Envar("STORAGE_BACKEND").String()
 
-	certsArchivePath = "/tmp/" + certsArchiveFileName
-	ccdArchivePath   = "/tmp/" + ccdArchiveFileName
+	certsArchivePath    = "/tmp/" + certsArchiveFileName
+	ccdArchivePath      = "/tmp/" + ccdArchiveFileName
+	indexTxtDateLayouts = []string{"060102150405Z", "20060102150405Z"}
 
 	version = "2.0.0"
 )
@@ -271,7 +271,7 @@ func (oAdmin *OvpnAdmin) userCreateHandler(w http.ResponseWriter, r *http.Reques
 	if userCreated {
 		oAdmin.clients = oAdmin.usersList()
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, userCreateStatus)
+		fmt.Fprint(w, userCreateStatus)
 		return
 	} else {
 		http.Error(w, userCreateStatus, http.StatusUnprocessableEntity)
@@ -284,12 +284,12 @@ func (oAdmin *OvpnAdmin) userRotateHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	_ = r.ParseForm()
-	err, msg := oAdmin.userRotate(r.FormValue("username"), r.FormValue("password"))
+	msg, err := oAdmin.userRotate(r.FormValue("username"), r.FormValue("password"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	} else {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, msg)
+		fmt.Fprint(w, msg)
 	}
 }
 
@@ -300,12 +300,12 @@ func (oAdmin *OvpnAdmin) userDeleteHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	_ = r.ParseForm()
-	err, msg := oAdmin.userDelete(r.FormValue("username"))
+	msg, err := oAdmin.userDelete(r.FormValue("username"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	} else {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, msg)
+		fmt.Fprint(w, msg)
 	}
 }
 
@@ -316,12 +316,12 @@ func (oAdmin *OvpnAdmin) userRevokeHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	_ = r.ParseForm()
-	err, msg := oAdmin.userRevoke(r.FormValue("username"))
+	msg, err := oAdmin.userRevoke(r.FormValue("username"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	} else {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, msg)
+		fmt.Fprint(w, msg)
 	}
 }
 
@@ -332,12 +332,12 @@ func (oAdmin *OvpnAdmin) userUnrevokeHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	_ = r.ParseForm()
-	err, msg := oAdmin.userUnrevoke(r.FormValue("username"))
+	msg, err := oAdmin.userUnrevoke(r.FormValue("username"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	} else {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, msg)
+		fmt.Fprint(w, msg)
 	}
 }
 
@@ -345,7 +345,7 @@ func (oAdmin *OvpnAdmin) userChangePasswordHandler(w http.ResponseWriter, r *htt
 	log.Info(r.RemoteAddr, " ", r.RequestURI)
 	_ = r.ParseForm()
 	if *authByPassword {
-		err, msg := oAdmin.userChangePassword(r.FormValue("username"), r.FormValue("password"))
+		msg, err := oAdmin.userChangePassword(r.FormValue("username"), r.FormValue("password"))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, `{"status":"error", "message": "%s"}`, msg)
@@ -748,8 +748,8 @@ func (oAdmin *OvpnAdmin) parseCcd(username string) Ccd {
 			switch {
 			case strings.HasPrefix(str[0], "ifconfig-push"):
 				ccd.ClientAddress = str[1]
-			case strings.HasPrefix(str[0], "push"):
-				ccd.CustomRoutes = append(ccd.CustomRoutes, ccdRoute{Address: strings.Trim(str[2], "\""), Mask: strings.Trim(str[3], "\""), Description: strings.Trim(strings.Join(str[4:], ""), "#")})
+			case strings.HasPrefix(str[0], "iroute"):
+				ccd.CustomRoutes = append(ccd.CustomRoutes, ccdRoute{Address: strings.Trim(str[1], "\""), Mask: strings.Trim(str[2], "\""), Description: ""})
 			}
 		}
 	}
@@ -856,13 +856,13 @@ func validateUsername(username string) error {
 	if validUsername.MatchString(username) {
 		return nil
 	} else {
-		return errors.New(fmt.Sprintf("Username can only contains %s", usernameRegexp))
+		return fmt.Errorf("Username can only contains %s", usernameRegexp)
 	}
 }
 
 func validatePassword(password string) error {
 	if utf8.RuneCountInString(password) < passwordMinLength {
-		return errors.New(fmt.Sprintf("Password too short, password length must be greater or equal %d", passwordMinLength))
+		return fmt.Errorf("Password too short, password length must be greater or equal %d", passwordMinLength)
 	} else {
 		return nil
 	}
@@ -891,23 +891,23 @@ func (oAdmin *OvpnAdmin) usersList() []OpenvpnClient {
 	for _, line := range indexTxtParser(fRead(*indexTxtPath)) {
 		if line.Identity != "server" && !strings.Contains(line.Identity, "REVOKED") {
 			totalCerts += 1
-			ovpnClient := OpenvpnClient{Identity: line.Identity, ExpirationDate: parseDateToString(indexTxtDateLayout, line.ExpirationDate, stringDateFormat)}
+			ovpnClient := OpenvpnClient{Identity: line.Identity, ExpirationDate: parseDateToString(indexTxtDateLayouts, line.ExpirationDate, stringDateFormat)}
 			switch {
 			case line.Flag == "V":
 				ovpnClient.AccountStatus = "Active"
 				validCerts += 1
 			case line.Flag == "R":
 				ovpnClient.AccountStatus = "Revoked"
-				ovpnClient.RevocationDate = parseDateToString(indexTxtDateLayout, line.RevocationDate, stringDateFormat)
+				ovpnClient.RevocationDate = parseDateToString(indexTxtDateLayouts, line.RevocationDate, stringDateFormat)
 				revokedCerts += 1
 			case line.Flag == "E":
 				ovpnClient.AccountStatus = "Expired"
 				expiredCerts += 1
 			}
 
-			ovpnClientCertificateExpire.WithLabelValues(line.Identity).Set(float64((parseDateToUnix(indexTxtDateLayout, line.ExpirationDate) - apochNow) / 3600 / 24))
+			ovpnClientCertificateExpire.WithLabelValues(line.Identity).Set(float64((parseDateToUnix(indexTxtDateLayouts, line.ExpirationDate) - apochNow) / 3600 / 24))
 
-			if (parseDateToUnix(indexTxtDateLayout, line.ExpirationDate) - apochNow) < 0 {
+			if (parseDateToUnix(indexTxtDateLayouts, line.ExpirationDate) - apochNow) < 0 {
 				ovpnClient.AccountStatus = "Expired"
 			}
 			ovpnClient.Connections = 0
@@ -925,7 +925,7 @@ func (oAdmin *OvpnAdmin) usersList() []OpenvpnClient {
 			users = append(users, ovpnClient)
 
 		} else {
-			ovpnServerCertExpire.Set(float64((parseDateToUnix(indexTxtDateLayout, line.ExpirationDate) - apochNow) / 3600 / 24))
+			ovpnServerCertExpire.Set(float64((parseDateToUnix(indexTxtDateLayouts, line.ExpirationDate) - apochNow) / 3600 / 24))
 		}
 	}
 
@@ -990,7 +990,7 @@ func (oAdmin *OvpnAdmin) userCreate(username, password string) (bool, string) {
 	return true, ucErr
 }
 
-func (oAdmin *OvpnAdmin) userChangePassword(username, password string) (error, string) {
+func (oAdmin *OvpnAdmin) userChangePassword(username, password string) (string, error) {
 
 	if checkUserExist(username) {
 		o := runBash(fmt.Sprintf("openvpn-user check --db.path %s --user %s | grep %s | wc -l", *authDatabase, username, username))
@@ -998,7 +998,7 @@ func (oAdmin *OvpnAdmin) userChangePassword(username, password string) (error, s
 
 		if err := validatePassword(password); err != nil {
 			log.Warningf("userChangePassword: %s", err.Error())
-			return err, err.Error()
+			return err.Error(), err
 		}
 
 		if strings.TrimSpace(o) == "0" {
@@ -1011,10 +1011,10 @@ func (oAdmin *OvpnAdmin) userChangePassword(username, password string) (error, s
 
 		log.Infof("Password for user %s was changed", username)
 
-		return nil, "Password changed"
+		return "Password changed", nil
 	}
 
-	return errors.New(fmt.Sprintf("User \"%s\" not found}", username)), fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username)
+	return fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username), fmt.Errorf("User \"%s\" not found}", username)
 }
 
 func (oAdmin *OvpnAdmin) getUserStatistic(username string) []clientStatus {
@@ -1027,7 +1027,7 @@ func (oAdmin *OvpnAdmin) getUserStatistic(username string) []clientStatus {
 	return userStatistic
 }
 
-func (oAdmin *OvpnAdmin) userRevoke(username string) (error, string) {
+func (oAdmin *OvpnAdmin) userRevoke(username string) (string, error) {
 	log.Infof("Revoke certificate for user %s", username)
 	if checkUserExist(username) {
 		// check certificate valid flag 'V'
@@ -1057,13 +1057,13 @@ func (oAdmin *OvpnAdmin) userRevoke(username string) (error, string) {
 		}
 
 		oAdmin.setState()
-		return nil, fmt.Sprintf("user \"%s\" revoked", username)
+		return fmt.Sprintf("user \"%s\" revoked", username), nil
 	}
 	log.Infof("user \"%s\" not found", username)
-	return errors.New(fmt.Sprintf("User \"%s\" not found}", username)), fmt.Sprintf("User \"%s\" not found", username)
+	return fmt.Sprintf("User \"%s\" not found", username), fmt.Errorf("User \"%s\" not found}", username)
 }
 
-func (oAdmin *OvpnAdmin) userUnrevoke(username string) (error, string) {
+func (oAdmin *OvpnAdmin) userUnrevoke(username string) (string, error) {
 	if checkUserExist(username) {
 		if *storageBackend == "kubernetes.secrets" {
 			err := app.easyrsaUnrevoke(username)
@@ -1122,12 +1122,12 @@ func (oAdmin *OvpnAdmin) userUnrevoke(username string) (error, string) {
 		}
 		crlFix()
 		oAdmin.clients = oAdmin.usersList()
-		return nil, fmt.Sprintf("{\"msg\":\"User %s successfully unrevoked\"}", username)
+		return fmt.Sprintf("{\"msg\":\"User %s successfully unrevoked\"}", username), nil
 	}
-	return errors.New(fmt.Sprintf("user \"%s\" not found", username)), fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username)
+	return fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username), fmt.Errorf("user \"%s\" not found", username)
 }
 
-func (oAdmin *OvpnAdmin) userRotate(username, newPassword string) (error, string) {
+func (oAdmin *OvpnAdmin) userRotate(username, newPassword string) (string, error) {
 	if checkUserExist(username) {
 		if *storageBackend == "kubernetes.secrets" {
 			err := app.easyrsaRotate(username, newPassword)
@@ -1173,7 +1173,7 @@ func (oAdmin *OvpnAdmin) userRotate(username, newPassword string) (error, string
 				if err != nil {
 					log.Error(err)
 				}
-				return errors.New(fmt.Sprintf("error rotaing user due:  %s", userCreateMessage)), userCreateMessage
+				return userCreateMessage, fmt.Errorf("error rotaing user due:  %s", userCreateMessage)
 			}
 
 			usersFromIndexTxt = indexTxtParser(fRead(*indexTxtPath))
@@ -1196,12 +1196,12 @@ func (oAdmin *OvpnAdmin) userRotate(username, newPassword string) (error, string
 		}
 		crlFix()
 		oAdmin.clients = oAdmin.usersList()
-		return nil, fmt.Sprintf("{\"msg\":\"User %s successfully rotated\"}", username)
+		return fmt.Sprintf("{\"msg\":\"User %s successfully rotated\"}", username), nil
 	}
-	return errors.New(fmt.Sprintf("user \"%s\" not found", username)), fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username)
+	return fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username), fmt.Errorf("user \"%s\" not found", username)
 }
 
-func (oAdmin *OvpnAdmin) userDelete(username string) (error, string) {
+func (oAdmin *OvpnAdmin) userDelete(username string) (string, error) {
 	if checkUserExist(username) {
 		if *storageBackend == "kubernetes.secrets" {
 			err := app.easyrsaDelete(username)
@@ -1228,9 +1228,9 @@ func (oAdmin *OvpnAdmin) userDelete(username string) (error, string) {
 		}
 		crlFix()
 		oAdmin.clients = oAdmin.usersList()
-		return nil, fmt.Sprintf("{\"msg\":\"User %s successfully deleted\"}", username)
+		return fmt.Sprintf("{\"msg\":\"User %s successfully deleted\"}", username), nil
 	}
-	return errors.New(fmt.Sprintf("User \"%s\" not found}", username)), fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username)
+	return fmt.Sprintf("{\"msg\":\"User \"%s\" not found\"}", username), fmt.Errorf("user \"%s\" not found}", username)
 }
 
 func (oAdmin *OvpnAdmin) mgmtRead(conn net.Conn) string {
@@ -1259,46 +1259,44 @@ func (oAdmin *OvpnAdmin) mgmtConnectedUsersParser(text, serverName string) []cli
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	for scanner.Scan() {
 		txt := scanner.Text()
-		if regexp.MustCompile(`^Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since$`).MatchString(txt) {
+		if regexp.MustCompile(`^HEADER,CLIENT_LIST`).MatchString(txt) {
 			isClientList = true
+			isRouteTable = false
 			continue
 		}
-		if regexp.MustCompile(`^ROUTING TABLE$`).MatchString(txt) {
+		if regexp.MustCompile(`^HEADER,ROUTING_TABLE`).MatchString(txt) {
 			isClientList = false
-			continue
-		}
-		if regexp.MustCompile(`^Virtual Address,Common Name,Real Address,Last Ref$`).MatchString(txt) {
 			isRouteTable = true
 			continue
 		}
-		if regexp.MustCompile(`^GLOBAL STATS$`).MatchString(txt) {
+		if regexp.MustCompile(`^GLOBAL_STATS`).MatchString(txt) {
 			// isRouteTable = false // ineffectual assignment to isRouteTable (ineffassign)
 			break
 		}
 		if isClientList {
 			user := strings.Split(txt, ",")
 
-			userName := user[0]
-			userAddress := user[1]
-			userBytesReceived := user[2]
-			userBytesSent := user[3]
-			userConnectedSince := user[4]
+			userName := user[1]
+			userAddress := user[3]
+			userBytesReceived := user[5]
+			userBytesSent := user[6]
+			userConnectedSince := user[7]
 
 			userStatus := clientStatus{CommonName: userName, RealAddress: userAddress, BytesReceived: userBytesReceived, BytesSent: userBytesSent, ConnectedSince: userConnectedSince, ConnectedTo: serverName}
 			u = append(u, userStatus)
 			bytesSent, _ := strconv.Atoi(userBytesSent)
 			bytesReceive, _ := strconv.Atoi(userBytesReceived)
-			ovpnClientConnectionFrom.WithLabelValues(userName, userAddress).Set(float64(parseDateToUnix(oAdmin.mgmtStatusTimeFormat, userConnectedSince)))
+			ovpnClientConnectionFrom.WithLabelValues(userName, userAddress).Set(float64(parseDateToUnix([]string{oAdmin.mgmtStatusTimeFormat}, userConnectedSince)))
 			ovpnClientBytesSent.WithLabelValues(userName).Set(float64(bytesSent))
 			ovpnClientBytesReceived.WithLabelValues(userName).Set(float64(bytesReceive))
 		}
 		if isRouteTable {
 			user := strings.Split(txt, ",")
 			for i := range u {
-				if u[i].CommonName == user[1] {
-					u[i].VirtualAddress = user[0]
-					u[i].LastRef = user[3]
-					ovpnClientConnectionInfo.WithLabelValues(user[1], user[0]).Set(float64(parseDateToUnix(oAdmin.mgmtStatusTimeFormat, user[3])))
+				if u[i].CommonName == user[2] {
+					u[i].VirtualAddress = user[1]
+					u[i].LastRef = user[4]
+					ovpnClientConnectionInfo.WithLabelValues(user[1], user[0]).Set(float64(parseDateToUnix([]string{oAdmin.mgmtStatusTimeFormat}, user[3])))
 					break
 				}
 			}
