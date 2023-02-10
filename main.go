@@ -1060,7 +1060,7 @@ func (oAdmin *OvpnAdmin) userRevoke(username string) (string, error) {
 		return fmt.Sprintf("user \"%s\" revoked", username), nil
 	}
 	log.Infof("user \"%s\" not found", username)
-	return fmt.Sprintf("User \"%s\" not found", username), fmt.Errorf("User \"%s\" not found}", username)
+	return fmt.Sprintf("User \"%s\" not found", username), fmt.Errorf("user \"%s\" not found}", username)
 }
 
 func (oAdmin *OvpnAdmin) userUnrevoke(username string) (string, error) {

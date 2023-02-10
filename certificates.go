@@ -18,10 +18,6 @@ func decodeCert(certPEMBytes []byte) (cert *x509.Certificate, err error) {
 	certPemBytes := certPem.Bytes
 
 	cert, err = x509.ParseCertificate(certPemBytes)
-	if err != nil {
-		return
-	}
-
 	return
 }
 
@@ -46,7 +42,9 @@ func decodePrivKey(privKey []byte) (key *rsa.PrivateKey, err error) {
 // return PEM encoded private key
 func genPrivKey() (privKeyPEM *bytes.Buffer, err error) {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
-
+	if err != nil {
+		return
+	}
 	//privKeyPKCS1 := x509.MarshalPKCS1PrivateKey(privKey)
 
 	privKeyPKCS8, err := x509.MarshalPKCS8PrivateKey(privKey)
@@ -60,7 +58,6 @@ func genPrivKey() (privKeyPEM *bytes.Buffer, err error) {
 		Bytes: privKeyPKCS8,
 	})
 
-
 	return
 }
 
@@ -68,8 +65,7 @@ func genPrivKey() (privKeyPEM *bytes.Buffer, err error) {
 func genCA(privKey *rsa.PrivateKey) (issuerPEM *bytes.Buffer, err error) {
 	serialNumberRange := new(big.Int).Lsh(big.NewInt(1), 128)
 
-	issuerSerial, err := rand.Int(rand.Reader, serialNumberRange)
-
+	issuerSerial, _ := rand.Int(rand.Reader, serialNumberRange)
 	issuerTemplate := x509.Certificate{
 		BasicConstraintsValid: true,
 		IsCA:                  true,
@@ -99,7 +95,7 @@ func genCA(privKey *rsa.PrivateKey) (issuerPEM *bytes.Buffer, err error) {
 // return PEM encoded certificate
 func genServerCert(privKey, caPrivKey *rsa.PrivateKey, ca *x509.Certificate, cn string) (issuerPEM *bytes.Buffer, err error) {
 	serialNumberRange := new(big.Int).Lsh(big.NewInt(1), 128)
-	serial, err := rand.Int(rand.Reader, serialNumberRange)
+	serial, _ := rand.Int(rand.Reader, serialNumberRange)
 
 	template := x509.Certificate{
 		BasicConstraintsValid: true,
@@ -131,7 +127,7 @@ func genServerCert(privKey, caPrivKey *rsa.PrivateKey, ca *x509.Certificate, cn 
 // return PEM encoded certificate
 func genClientCert(privKey, caPrivKey *rsa.PrivateKey, ca *x509.Certificate, cn string) (issuerPEM *bytes.Buffer, err error) {
 	serialNumberRange := new(big.Int).Lsh(big.NewInt(1), 128)
-	serial, err := rand.Int(rand.Reader, serialNumberRange)
+	serial, _ := rand.Int(rand.Reader, serialNumberRange)
 
 	template := x509.Certificate{
 		BasicConstraintsValid: true,
